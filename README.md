@@ -23,6 +23,11 @@ streamlit run app.py
 The browser dashboard contains the student profile form and course search. Profiles
 are saved locally to `student_profile.json`.
 
+The requirement panel calculates CDC, DEL and HUEL progress from the selected
+programme and the completed/current course codes. Courses already counted by AUGS
+as open electives are entered in the profile so that OPEL progress can be calculated
+without guessing how a transcript course was classified.
+
 ## Gemini query parsing
 
 ```bash
@@ -58,4 +63,6 @@ python -m unittest -v
 - `handout_parser.py`: handout extraction
 
 CDC, DEL and HUEL classifications come from `programme_categories.json`. OPEL
-results are withheld when the supplied data cannot establish the classification.
+classification follows Academic Regulations clause 2.05 after outstanding discipline
+and humanities requirements are accounted for. Recommendations also check explicit
+prerequisites, equivalent courses, unit limits, class times and examination slots.

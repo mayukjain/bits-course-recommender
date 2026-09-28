@@ -13,12 +13,28 @@ from constraints import PlannedCourse, StudentState, evaluate_constraints, norma
 ROOT = Path(__file__).resolve().parent
 STOP_WORDS = {
     "a", "an", "and", "are", "course", "courses", "find", "for", "i", "in",
-    "is", "me", "of", "on", "prefer", "related", "suggest", "the", "to", "want", "with",
+    "is", "me", "need", "of", "on", "prefer", "related", "suggest", "the", "to", "want", "with",
     "del", "dels", "huel", "huels", "opel", "opels", "cdc", "cdcs", "please",
-    "no", "without", "quiz", "quizzes", "sugesst", "sugest",
+    "no", "without", "quiz", "quizzes", "sugesst", "sugest", "attendance", "requirement",
+    "midsem", "mid-sem", "compre", "evaluation", "project", "projects", "project-based",
+    "open-book", "makeup", "make-up", "lenient", "small", "low", "lower", "light", "weight",
 }
 DAY_ALIASES = {
-    "m": "Mon", "tu": "Tue", "w": "Wed", "th": "Thu", "f": "Fri", "sa": "Sat", "su": "Sun"
+    "m": "Mon", "t": "Tue", "tu": "Tue", "w": "Wed", "th": "Thu", "f": "Fri",
+    "s": "Sat", "sa": "Sat", "su": "Sun"
+}
+DEL_REQUIREMENTS = {
+    "BIOTECHNOLOGY": 5,
+    "BIOTECHNOLOGY WITH SPECIALIZATION IN APPLIED MOLECULAR BIOLOGY": 5,
+    "CHEMICAL ENGINEERING": 5,
+    "CHEMICAL ENGINEERING WITH SPECIALIZATION IN ENERGY, ENVIRONMENT, AND SUSTAINABILITY": 5,
+    "CHEMISTRY": 4,
+    "ECONOMICS": 6,
+    "MATHEMATICS": 5,
+    "BIOLOGICAL SCIENCES": 4,
+    "PHYSICS": 4,
+    "PHYSICS WITH SPECIALIZATION IN SPACE SCIENCE AND TECHNOLOGY": 4,
+    "SEMICONDUCTOR AND NANOSCIENCE": 7,
 }
 
 
@@ -55,6 +71,11 @@ def parse_query(query: str) -> dict[str, Any]:
         "no_attendance": bool(re.search(r"no attendance|attendance (?:not required|optional)", lower)),
         "no_quiz": bool(re.search(r"\bno\s+quizz?(?:es)?\b|\bwithout\s+(?:any\s+)?quizz?(?:es)?\b", lower)),
         "no_midsem": bool(re.search(r"no mid[- ]?sem|without (?:a )?mid", lower)),
+        "low_midsem": bool(re.search(r"(?:small|low|lower|light)\s+(?:weight(?:age)?\s+)?mid[- ]?sem|mid[- ]?sem.*(?:small|low|lower|light)", lower)),
+        "fewer_quizzes": bool(re.search(r"(?:few|fewer|less|minimum)\s+quizz?(?:es)?", lower)),
+        "high_project_weight": bool(re.search(r"(?:high|higher|more|maximum)\s+project(?:\s+weight(?:age)?)?|project[- ]based", lower)),
+        "low_exam_weight": bool(re.search(r"(?:low|lower|less|minimum)\s+(?:exam|examination)\s+weight", lower)),
+        "lenient_makeup": bool(re.search(r"lenient|easy\s+make[- ]?up", lower) and re.search(r"make[- ]?up", lower)),
         "no_compre": bool(re.search(r"no compre|without (?:a )?compre", lower)),
         "project_based": bool(re.search(r"project[- ]based|(?:prefer|with) projects?", lower)),
         "open_book": bool(re.search(r"open[- ]?book", lower)),
@@ -67,14 +88,21 @@ def parse_query(query: str) -> dict[str, Any]:
 def parse_meeting(text: str | None) -> set[tuple[str, int]]:
     if not text:
         return set()
-    cleaned = re.sub(r"\s+", " ", text.strip())
-    period_match = re.search(r"(?:^|\s)(\d{1,2})(?:\s|$)", cleaned)
-    if not period_match:
-        return set()
-    period = int(period_match.group(1))
-    prefix = cleaned[:period_match.start()].replace(" ", "")
-    days = re.findall(r"Th|Tu|Sa|Su|M|W|F", prefix, re.I)
-    return {(DAY_ALIASES[day.lower()], period) for day in days if day.lower() in DAY_ALIASES}
+    tokens = re.findall(r"Th|Tu|Sa|Su|M|T|W|F|S|\d{1,2}", text, re.I)
+    pending_days: list[str] = []
+    slots: set[tuple[str, int]] = set()
+    for token in tokens:
+        if token.lower() in DAY_ALIASES:
+            pending_days.append(DAY_ALIASES[token.lower()])
+            continue
+        if not pending_days:
+            continue
+        periods = [int(token)]
+        if len(token) == 2 and int(token) > 12 and "0" not in token:
+            periods = [int(token[0]), int(token[1])]
+        slots.update((day, period) for day in pending_days for period in periods)
+        pending_days = []
+    return slots
 
 
 @dataclass
@@ -89,6 +117,7 @@ class StudentProfile:
     current_registered_units: int = 0
     completed_courses: list[str] = field(default_factory=list)
     current_courses: list[str] = field(default_factory=list)
+    completed_opel_courses: list[str] = field(default_factory=list)
     minor: str = ""
     interests: list[str] = field(default_factory=list)
     requirement_totals: dict[str, int] = field(default_factory=lambda: {"CDC": 0, "DEL": 0, "HUEL": 0, "OPEL": 0})
@@ -98,7 +127,7 @@ class StudentProfile:
     def from_dict(cls, value: dict[str, Any]) -> "StudentProfile":
         allowed = cls.__dataclass_fields__
         data = {key: value[key] for key in allowed if key in value}
-        for key in ("completed_courses", "current_courses", "interests"):
+        for key in ("completed_courses", "current_courses", "completed_opel_courses", "interests"):
             if isinstance(data.get(key), str):
                 data[key] = [part.strip() for part in data[key].split(",") if part.strip()]
         return cls(**data)
@@ -160,7 +189,54 @@ class CourseRecommender:
                 return "unknown_programme", None
             row = next((item for item in programmes[programme_name].get(category, []) if item["course_code"] == code), None)
             return ("verified", row.get("source")) if row else ("rejected", None)
+        if category == "OPEL":
+            analysis = self.requirement_analysis(profile)
+            if code in analysis["course_sets"]["CDC"]:
+                return "rejected", None
+            if code in analysis["course_sets"]["DEL"] and analysis["remaining"]["DEL"] > 0:
+                return "rejected", None
+            if code in analysis["course_sets"]["HUEL"] and analysis["remaining"]["HUEL"] > 0:
+                return "rejected", None
+            clause = next((row for row in self.policy_data.get("regulation_clauses", [])
+                           if row.get("clause_id") == "2.05"), None)
+            source = ({"source_document": clause["source_document"], "pages": clause["pages"],
+                       "section": "Clause 2.05"} if clause else None)
+            return "verified", source
         return "unknown_policy", None
+
+    def _programme_record(self, degree: str) -> tuple[str | None, dict[str, Any]]:
+        wanted = self._programme_name(degree)
+        programmes = self.category_data.get("programmes", {})
+        name = next((name for name in programmes if self._programme_name(name) == wanted), None)
+        return name, programmes.get(name, {}) if name else {}
+
+    def requirement_analysis(self, profile: StudentProfile) -> dict[str, Any]:
+        names_and_records = [self._programme_record(profile.degree)]
+        if profile.dual_degree:
+            names_and_records.append(self._programme_record(profile.dual_degree))
+        records = [(name, record) for name, record in names_and_records if name]
+        cdc = {row["course_code"] for _, record in records for row in record.get("CDC", [])}
+        dels_by_degree = [{row["course_code"] for row in record.get("DEL", [])} for _, record in records]
+        dele = set().union(*dels_by_degree) if dels_by_degree else set()
+        huel = {row["course_code"] for row in self.category_data.get("huel", [])}
+        completed = _codes(profile.completed_courses) | _codes(profile.current_courses)
+        totals = {
+            "CDC": len(cdc),
+            "DEL": sum(DEL_REQUIREMENTS.get(self._programme_name(name or ""), 4) for name, _ in records),
+            "HUEL": 3,
+            "OPEL": 5,
+        }
+        completed_counts = {
+            "CDC": len(completed & cdc),
+            "DEL": sum(min(DEL_REQUIREMENTS.get(self._programme_name(name or ""), 4), len(completed & pool))
+                       for (name, _), pool in zip(records, dels_by_degree)),
+            "HUEL": len(completed & huel),
+            "OPEL": len(_codes(profile.completed_opel_courses)),
+        }
+        remaining = {kind: max(0, totals[kind] - completed_counts[kind]) for kind in totals}
+        return {"totals": totals, "completed": completed_counts, "remaining": remaining,
+                "programmes": [name for name, _ in records],
+                "course_sets": {"CDC": cdc, "DEL": dele, "HUEL": huel}}
 
     def _current_slots(self, profile: StudentProfile) -> set[tuple[str, int]]:
         slots: set[tuple[str, int]] = set()
@@ -176,6 +252,10 @@ class CourseRecommender:
         completed, current = _codes(profile.completed_courses), _codes(profile.current_courses)
         if code in completed or code in current:
             return False, ["already completed or currently registered"], review, evidence_rows
+        for group in self.policy_data.get("equivalent_course_groups", []):
+            equivalents = set(group.get("equivalent_courses", []))
+            if code in equivalents and (equivalents - {code}) & completed:
+                return False, ["an equivalent course is already completed"], review, evidence_rows
         available = [row for row in self.offerings.get(code, []) if not row.get("cancelled")]
         if not available:
             return False, ["not available in the current timetable"], review, evidence_rows
@@ -201,10 +281,18 @@ class CourseRecommender:
                   preferences: dict[str, Any] | None = None) -> dict[str, Any]:
         profile = StudentProfile.from_dict(profile_value)
         preferences = preferences or parse_query(query)
+        requirements = self.requirement_analysis(profile)
         interest_tokens = _tokens(" ".join(profile.interests))
         query_tokens = set(preferences["keywords"])
         wanted = query_tokens | interest_tokens
         occupied = self._current_slots(profile)
+        current_exams: set[tuple[str, str, str]] = set()
+        for current_code in _codes(profile.current_courses):
+            for row in self.offerings.get(current_code, []):
+                for exam_kind in ("midsem", "compre"):
+                    exam = row.get(exam_kind)
+                    if exam:
+                        current_exams.add((exam_kind, exam["date"], exam["session"]))
         results = []
         unknown_counts: dict[str, int] = {}
 
@@ -213,6 +301,13 @@ class CourseRecommender:
             if not eligible:
                 continue
             offering = next(row for row in rows if not row.get("cancelled"))
+            exam_clashes = []
+            for exam_kind in ("midsem", "compre"):
+                exam = offering.get(exam_kind)
+                if exam and (exam_kind, exam["date"], exam["session"]) in current_exams:
+                    exam_clashes.append(exam_kind)
+            if exam_clashes:
+                continue
             units = offering.get("credits", {}).get("u") or self.catalogue.get(code, {}).get("units") or 0
             centralized = evaluate_constraints(
                 StudentState(profile.degree_level, _codes(profile.completed_courses), profile.admission_year),
@@ -264,6 +359,40 @@ class CourseRecommender:
                 else:
                     rejected = True
             components = (handout or {}).get("evaluation_components", [])
+            midsem_weights = [row["weight"] for row in components if row.get("type") == "midsem" and row.get("weight") is not None]
+            quiz_rows_all = [row for row in components if row.get("type") == "quiz" or
+                             re.search(r"\bquiz(?:zes|zes|es|z)?\b", row.get("name", ""), re.I)]
+            quiz_count = sum(row.get("count") or 1 for row in quiz_rows_all)
+            project_weight = sum(row.get("weight") or 0 for row in components if row.get("type") == "project")
+            exam_weight = sum(row.get("weight") or 0 for row in components if row.get("type") in {"midsem", "compre"})
+            if preferences.get("low_midsem"):
+                if not midsem_weights:
+                    rejected = True
+                else:
+                    score += max(0, 40 - min(midsem_weights)) / 4
+                    matches.append(f"midsem weight is {min(midsem_weights):g}%")
+            if preferences.get("fewer_quizzes"):
+                if not handout or not handout.get("evaluation_weights_sum_to_100"):
+                    rejected = True
+                else:
+                    score += max(0, 5 - quiz_count)
+                    matches.append(f"{quiz_count} listed quiz component{'s' if quiz_count != 1 else ''}")
+            if preferences.get("high_project_weight"):
+                if not project_weight:
+                    rejected = True
+                else:
+                    score += project_weight / 5
+                    matches.append(f"project weight is {project_weight:g}%")
+            if preferences.get("low_exam_weight"):
+                if not components:
+                    rejected = True
+                else:
+                    score += max(0, 100 - exam_weight) / 10
+                    matches.append(f"listed exam weight is {exam_weight:g}%")
+            if preferences.get("lenient_makeup"):
+                rejected = True
+                unknown.append("makeup-policy leniency")
+                unknown_counts["makeup-policy leniency"] = unknown_counts.get("makeup-policy leniency", 0) + 1
             if preferences.get("no_quiz"):
                 quiz_rows = [row for row in components if row.get("type") == "quiz" or
                              re.search(r"\bquiz(?:zes|zes|es|z)?\b", " ".join(
@@ -344,7 +473,8 @@ class CourseRecommender:
             })
         results.sort(key=lambda row: (-row["score"], row["course_code"]))
         return {
-            "query": query, "preferences": preferences, "remaining_requirements": profile.remaining_requirements(),
+            "query": query, "preferences": preferences, "remaining_requirements": requirements["remaining"],
+            "requirement_analysis": {key: value for key, value in requirements.items() if key != "course_sets"},
             "recommendations": results[:max(1, min(limit, 25))], "eligible_candidates": len(results),
             "unverified_summary": unknown_counts,
             "notice": ("Requested categories are enforced against the extracted Bulletin programme map. "

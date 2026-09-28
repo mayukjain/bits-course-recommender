@@ -21,6 +21,8 @@ class GeminiIntentTests(unittest.TestCase):
             "category": "del", "keywords": ["artificial", "intelligence"],
             "no_attendance": False, "no_quiz": False, "no_midsem": True, "no_compre": False,
             "project_based": False, "open_book": False,
+            "low_midsem": False, "fewer_quizzes": False, "high_project_weight": False,
+            "low_exam_weight": False, "lenient_makeup": False,
             "no_early_classes": False, "free_day": None, "makeup_requested": False,
         }
         response = {"candidates": [{"content": {"parts": [{"text": json.dumps(preferences)}]}}]}
@@ -45,6 +47,8 @@ class GeminiIntentTests(unittest.TestCase):
         preferences = {
             "category": "del", "keywords": ["AI"], "no_attendance": False, "no_quiz": False,
             "no_midsem": False, "no_compre": False, "project_based": False,
+            "low_midsem": False, "fewer_quizzes": False, "high_project_weight": False,
+            "low_exam_weight": False, "lenient_makeup": False,
             "open_book": False, "no_early_classes": False, "free_day": None,
             "makeup_requested": False,
         }

@@ -65,15 +65,11 @@ def profile_form(profile: dict[str, Any]) -> dict[str, Any] | None:
 
         completed_courses = st.text_area("Completed courses", ", ".join(profile.get("completed_courses", [])), placeholder="CS F111, MATH F111")
         current_courses = st.text_area("Current courses", ", ".join(profile.get("current_courses", [])), placeholder="CS F211, MATH F212")
-        st.write("Requirement progress")
-        totals = profile.get("requirement_totals", {})
-        completed = profile.get("requirement_completed", {})
-        requirement_totals: dict[str, int] = {}
-        requirement_completed: dict[str, int] = {}
-        for column, kind in zip(st.columns(4), REQUIREMENTS):
-            with column:
-                requirement_totals[kind] = st.number_input(f"{kind} total", min_value=0, value=int(totals.get(kind, 0)), key=f"total_{kind}")
-                requirement_completed[kind] = st.number_input(f"{kind} completed", min_value=0, value=int(completed.get(kind, 0)), key=f"done_{kind}")
+        completed_opels = st.text_area(
+            "Completed courses counted as OPEL",
+            ", ".join(profile.get("completed_opel_courses", [])),
+            help="Enter the completed courses that AUGS has counted toward the open-elective requirement.",
+        )
         submitted = st.form_submit_button("Save profile", use_container_width=True)
     if not submitted:
         return None
@@ -82,8 +78,8 @@ def profile_form(profile: dict[str, Any]) -> dict[str, Any] | None:
         "degree": degree, "dual_degree": dual_degree, "degree_level": degree_level,
         "current_semester": current_semester, "current_registered_units": current_units,
         "completed_courses": comma_list(completed_courses), "current_courses": comma_list(current_courses),
+        "completed_opel_courses": comma_list(completed_opels),
         "minor": minor, "interests": comma_list(interests),
-        "requirement_totals": requirement_totals, "requirement_completed": requirement_completed,
     }
 
 
@@ -91,6 +87,13 @@ def show_recommendations(result: dict[str, Any]) -> None:
     remaining = result.get("remaining_requirements", {})
     for column, kind in zip(st.columns(4), REQUIREMENTS):
         column.metric(f"{kind} remaining", remaining.get(kind, 0))
+    analysis = result.get("requirement_analysis", {})
+    with st.expander("Requirement calculation"):
+        totals = analysis.get("totals", {})
+        completed = analysis.get("completed", {})
+        st.write("Programmes: " + ", ".join(analysis.get("programmes", [])))
+        for kind in REQUIREMENTS:
+            st.write(f"{kind}: {completed.get(kind, 0)} completed or current / {totals.get(kind, 0)} required")
     agent = result.get("agent", {})
     if agent.get("warning"):
         st.warning(agent["warning"])
@@ -98,6 +101,9 @@ def show_recommendations(result: dict[str, Any]) -> None:
     recommendations = result.get("recommendations", [])
     if not recommendations:
         st.info("No courses satisfy all verified requirements and preferences.")
+        unavailable = result.get("unverified_summary", {})
+        if unavailable:
+            st.write("Could not verify: " + ", ".join(unavailable))
         return
     for course in recommendations:
         with st.container(border=True):

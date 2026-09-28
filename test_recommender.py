@@ -48,6 +48,7 @@ class RecommenderTests(unittest.TestCase):
         self.assertEqual(parsed["category"], "del")
         self.assertTrue(parsed["no_midsem"] and parsed["no_early_classes"])
         self.assertEqual(parse_meeting("M W F 2"), {("Mon", 2), ("Wed", 2), ("Fri", 2)})
+        self.assertEqual(parse_meeting("M W 5 Th 10"), {("Mon", 5), ("Wed", 5), ("Thu", 10)})
 
     def test_no_quiz_query_is_parsed_and_enforced(self):
         self.assertTrue(parse_query("suggest no quizzes AI DEL")["no_quiz"])
@@ -80,6 +81,17 @@ class RecommenderTests(unittest.TestCase):
     def test_ai_abbreviation_affects_ranking(self):
         parsed = parse_query("Suggest AI-related DELs")
         self.assertTrue({"artificial", "intelligence"} <= set(parsed["keywords"]))
+
+    def test_low_midsem_is_ranked(self):
+        parsed = parse_query("AI DEL with a small midsem")
+        self.assertTrue(parsed["low_midsem"])
+
+    def test_requirements_are_calculated_from_courses(self):
+        profile = StudentProfile(degree="B.E. Computer Science", completed_courses=["CS F301"])
+        analysis = self.engine.requirement_analysis(profile)
+        self.assertEqual(analysis["totals"]["DEL"], 4)
+        self.assertEqual(analysis["completed"]["DEL"], 1)
+        self.assertEqual(analysis["remaining"]["DEL"], 3)
 
     def test_central_unit_limit_blocks_candidate(self):
         profile = {"degree": "B.E. Computer Science", "completed_courses": ["CS F111"],

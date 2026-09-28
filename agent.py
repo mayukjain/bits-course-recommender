@@ -17,11 +17,15 @@ PREFERENCE_SCHEMA = {
         "no_attendance": {"type": "boolean"}, "no_quiz": {"type": "boolean"},
         "no_midsem": {"type": "boolean"},
         "no_compre": {"type": "boolean"}, "project_based": {"type": "boolean"},
+        "low_midsem": {"type": "boolean"}, "fewer_quizzes": {"type": "boolean"},
+        "high_project_weight": {"type": "boolean"}, "low_exam_weight": {"type": "boolean"},
+        "lenient_makeup": {"type": "boolean"},
         "open_book": {"type": "boolean"}, "no_early_classes": {"type": "boolean"},
         "free_day": {"type": ["string", "null"], "enum": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", None]},
         "makeup_requested": {"type": "boolean"},
     },
     "required": ["category", "keywords", "no_attendance", "no_quiz", "no_midsem", "no_compre",
+                 "low_midsem", "fewer_quizzes", "high_project_weight", "low_exam_weight", "lenient_makeup",
                  "project_based", "open_book", "no_early_classes", "free_day", "makeup_requested"],
     "additionalProperties": False,
 }
@@ -59,6 +63,7 @@ class IntentAgent:
             parsed["keywords"] = parse_query(" ".join(parsed.get("keywords", [])))["keywords"]
             local = parse_query(query)
             for field in ("no_attendance", "no_quiz", "no_midsem", "no_compre", "project_based",
+                          "low_midsem", "fewer_quizzes", "high_project_weight", "low_exam_weight", "lenient_makeup",
                           "open_book", "no_early_classes", "makeup_requested"):
                 parsed[field] = bool(parsed.get(field) or local[field])
             parsed["category"] = parsed.get("category") or local["category"]
