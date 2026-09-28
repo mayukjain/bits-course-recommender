@@ -5,6 +5,7 @@ student_profile.json
 .env
 .DS_Store
 .vscode/
+web/
 *.pdf
 handouts/
 temp.ipynb

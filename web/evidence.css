@@ -1,7 +1,0 @@
-details{font-size:11px;color:var(--muted);margin:12px 0}
-summary{cursor:pointer;font-weight:750;color:var(--green)}
-.evidence{margin-top:8px}
-.evidence-row{border-top:1px solid var(--line);padding:8px 0}
-.evidence-row b,.evidence-row span{display:block}
-.evidence-row span{margin-top:3px}
-.separator{color:var(--muted)}

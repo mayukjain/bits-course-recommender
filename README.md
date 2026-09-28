@@ -1,6 +1,6 @@
 # BITS Academic Course Recommender
 
-Course recommendation dashboard using the supplied BITS Bulletin, Academic
+Python course recommendation application using the supplied BITS Bulletin, Academic
 Regulations, timetable and course handouts.
 
 ## Requirements
@@ -14,15 +14,26 @@ Regulations, timetable and course handouts.
 python app.py
 ```
 
-Open <http://127.0.0.1:8000>.
+This starts an interactive terminal menu. The first run asks for the student profile
+and saves it to `student_profile.json`.
 
-To use a different port:
+Run a single query with the saved profile:
 
 ```bash
-python app.py --port 8080
+python app.py --query "Suggest AI DELs with no quiz"
 ```
 
-Profiles are saved to `student_profile.json`.
+Print the full result as JSON:
+
+```bash
+python app.py --query "Suggest AI DELs" --json
+```
+
+Create or update the profile:
+
+```bash
+python app.py --profile
+```
 
 ## Gemini query parsing
 
@@ -52,12 +63,11 @@ python -m unittest -v
 
 ## Main files
 
-- `app.py`: web server and API
+- `app.py`: terminal interface and profile management
 - `agent.py`: query parsing workflow
 - `recommender.py`: eligibility checks and course ranking
 - `constraints.py`: Bulletin, regulations and timetable extraction
 - `handout_parser.py`: handout extraction
-- `web/`: dashboard files
 
 CDC, DEL and HUEL classifications come from `programme_categories.json`. OPEL
 results are withheld when the supplied data cannot establish the classification.
