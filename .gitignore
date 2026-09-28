@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+student_profile.json
+.env
+.DS_Store
+.vscode/
+*.pdf
+handouts/
+temp.ipynb
+extraction_report.json
