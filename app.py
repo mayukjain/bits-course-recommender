@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-import argparse
 import json
+import os
 from pathlib import Path
 from typing import Any
 
+import streamlit as st
+
 from agent import RecommendationAgent
 from recommender import CourseRecommender
-
 
 ROOT = Path(__file__).resolve().parent
 PROFILE_FILE = ROOT / "student_profile.json"
@@ -16,12 +17,6 @@ REQUIREMENTS = ("CDC", "DEL", "HUEL", "OPEL")
 
 def comma_list(value: str) -> list[str]:
     return [part.strip() for part in value.split(",") if part.strip()]
-
-
-def ask(label: str, current: Any = "") -> str:
-    suffix = f" [{current}]" if current not in (None, "", [], {}) else ""
-    value = input(f"{label}{suffix}: ").strip()
-    return value or str(current or "")
 
 
 def load_profile() -> dict[str, Any]:
@@ -34,140 +29,135 @@ def save_profile(profile: dict[str, Any]) -> None:
     PROFILE_FILE.write_text(json.dumps(profile, indent=2), encoding="utf-8")
 
 
-def edit_profile(existing: dict[str, Any] | None = None) -> dict[str, Any]:
-    profile = dict(existing or {})
-    print("\nStudent profile\n")
-    profile["name"] = ask("Name", profile.get("name", ""))
-    profile["campus"] = ask("Campus", profile.get("campus", "Pilani"))
-    year = ask("Admission year", profile.get("admission_year", ""))
-    profile["admission_year"] = int(year) if year.isdigit() else None
-    profile["degree"] = ask("Degree", profile.get("degree", "B.E. Computer Science"))
-    profile["dual_degree"] = ask("Dual degree", profile.get("dual_degree", ""))
-    profile["degree_level"] = ask(
-        "Degree level (first_degree/higher_degree)", profile.get("degree_level", "first_degree")
-    )
-    profile["current_semester"] = ask("Current semester", profile.get("current_semester", ""))
-    units = ask("Currently registered units", profile.get("current_registered_units", 0))
-    profile["current_registered_units"] = int(units) if units.isdigit() else 0
-    profile["completed_courses"] = comma_list(ask(
-        "Completed courses, comma separated", ", ".join(profile.get("completed_courses", []))
-    ))
-    profile["current_courses"] = comma_list(ask(
-        "Current courses, comma separated", ", ".join(profile.get("current_courses", []))
-    ))
-    profile["minor"] = ask("Minor", profile.get("minor", ""))
-    profile["interests"] = comma_list(ask(
-        "Interests, comma separated", ", ".join(profile.get("interests", []))
-    ))
-    totals = dict(profile.get("requirement_totals", {}))
-    completed = dict(profile.get("requirement_completed", {}))
-    print("\nRequirement counts")
-    for kind in REQUIREMENTS:
-        total = ask(f"{kind} total", totals.get(kind, 0))
-        done = ask(f"{kind} completed", completed.get(kind, 0))
-        totals[kind] = int(total) if total.isdigit() else 0
-        completed[kind] = int(done) if done.isdigit() else 0
-    profile["requirement_totals"] = totals
-    profile["requirement_completed"] = completed
-    save_profile(profile)
-    print(f"\nSaved to {PROFILE_FILE.name}\n")
-    return profile
+@st.cache_resource
+def load_engine() -> CourseRecommender:
+    return CourseRecommender(ROOT)
 
 
 def source_text(source: dict[str, Any] | None) -> str:
     if not source:
-        return "source unavailable"
+        return "Source unavailable"
     pages = source.get("pages") or source.get("pdf_page") or "?"
     if isinstance(pages, list):
         pages = ", ".join(map(str, pages))
-    section = f", {source['section']}" if source.get("section") else ""
-    return f"{source.get('source_document', 'source')}, page {pages}{section}"
+    section = f" · {source['section']}" if source.get("section") else ""
+    return f"{source.get('source_document', 'source')} · page {pages}{section}"
 
 
-def print_result(result: dict[str, Any]) -> None:
-    agent = result.get("agent", {})
-    print(f"\nParser: {agent.get('intent_provider', 'local')}")
-    if agent.get("warning"):
-        print(f"Warning: {agent['warning']}")
-    preferences = result.get("preferences", {})
-    active = [key for key, value in preferences.items() if value not in (False, None, [], "")]
-    print("Preferences: " + (", ".join(active) if active else "none"))
+def profile_form(profile: dict[str, Any]) -> dict[str, Any] | None:
+    with st.form("student_profile"):
+        first, second = st.columns(2)
+        with first:
+            name = st.text_input("Name", profile.get("name", ""))
+            campuses = ("Pilani", "Goa", "Hyderabad", "Dubai")
+            current_campus = profile.get("campus", "Pilani")
+            campus = st.selectbox("Campus", campuses, index=campuses.index(current_campus) if current_campus in campuses else 0)
+            admission_year = st.number_input("Admission year", 2000, 2035, int(profile.get("admission_year") or 2024))
+            degree = st.text_input("Degree", profile.get("degree", "B.E. Computer Science"))
+            dual_degree = st.text_input("Dual degree", profile.get("dual_degree", ""))
+        with second:
+            levels = ("first_degree", "higher_degree")
+            degree_level = st.selectbox("Degree level", levels, index=1 if profile.get("degree_level") == "higher_degree" else 0)
+            current_semester = st.text_input("Current semester", profile.get("current_semester", ""))
+            current_units = st.number_input("Currently registered units", 0, 30, int(profile.get("current_registered_units", 0)))
+            minor = st.text_input("Minor", profile.get("minor", ""))
+            interests = st.text_input("Interests", ", ".join(profile.get("interests", [])), placeholder="artificial intelligence, economics")
+
+        completed_courses = st.text_area("Completed courses", ", ".join(profile.get("completed_courses", [])), placeholder="CS F111, MATH F111")
+        current_courses = st.text_area("Current courses", ", ".join(profile.get("current_courses", [])), placeholder="CS F211, MATH F212")
+        st.write("Requirement progress")
+        totals = profile.get("requirement_totals", {})
+        completed = profile.get("requirement_completed", {})
+        requirement_totals: dict[str, int] = {}
+        requirement_completed: dict[str, int] = {}
+        for column, kind in zip(st.columns(4), REQUIREMENTS):
+            with column:
+                requirement_totals[kind] = st.number_input(f"{kind} total", min_value=0, value=int(totals.get(kind, 0)), key=f"total_{kind}")
+                requirement_completed[kind] = st.number_input(f"{kind} completed", min_value=0, value=int(completed.get(kind, 0)), key=f"done_{kind}")
+        submitted = st.form_submit_button("Save profile", use_container_width=True)
+    if not submitted:
+        return None
+    return {
+        "name": name, "campus": campus, "admission_year": admission_year,
+        "degree": degree, "dual_degree": dual_degree, "degree_level": degree_level,
+        "current_semester": current_semester, "current_registered_units": current_units,
+        "completed_courses": comma_list(completed_courses), "current_courses": comma_list(current_courses),
+        "minor": minor, "interests": comma_list(interests),
+        "requirement_totals": requirement_totals, "requirement_completed": requirement_completed,
+    }
+
+
+def show_recommendations(result: dict[str, Any]) -> None:
     remaining = result.get("remaining_requirements", {})
-    print("Remaining: " + ", ".join(f"{key} {remaining.get(key, 0)}" for key in REQUIREMENTS))
-
+    for column, kind in zip(st.columns(4), REQUIREMENTS):
+        column.metric(f"{kind} remaining", remaining.get(kind, 0))
+    agent = result.get("agent", {})
+    if agent.get("warning"):
+        st.warning(agent["warning"])
+    st.caption(f"Query parser: {agent.get('intent_provider', 'deterministic')}")
     recommendations = result.get("recommendations", [])
     if not recommendations:
-        print("\nNo courses satisfy all verified requirements and preferences.\n")
+        st.info("No courses satisfy all verified requirements and preferences.")
         return
-
-    for index, course in enumerate(recommendations, 1):
-        requirement = f" | {course['requirement']}" if course.get("requirement") else ""
-        print(f"\n{index}. {course['course_code']} | {course['title']}{requirement}")
-        print(f"   Computer code: {course.get('computer_code')} | Units: {course.get('units', '?')}")
-        for message in course.get("eligibility", []) + course.get("matches", []):
-            print(f"   - {message}")
-        for section in course.get("sections", []):
-            room = f", room {section['room']}" if section.get("room") else ""
-            print(f"   - {section.get('section')}: {section.get('meeting') or 'time unavailable'}{room}")
-        if course.get("evidence"):
-            print("   Evidence:")
-            for item in course["evidence"]:
-                print(f"     {item.get('claim')}: {source_text(item.get('source'))}")
-    print()
-
-
-def run_query(agent: RecommendationAgent, profile: dict[str, Any], query: str,
-              limit: int, as_json: bool = False) -> None:
-    result = agent.run(profile, query, limit)
-    if as_json:
-        print(json.dumps(result, indent=2, ensure_ascii=False))
-    else:
-        print_result(result)
-
-
-def interactive(agent: RecommendationAgent) -> None:
-    profile = load_profile()
-    if not profile:
-        profile = edit_profile()
-    while True:
-        print("1. Ask for course recommendations")
-        print("2. Edit profile")
-        print("3. Show data statistics")
-        print("4. Exit")
-        choice = input("Choice: ").strip()
-        if choice == "1":
-            query = input("Query: ").strip()
-            if query:
-                run_query(agent, profile, query, 8)
-        elif choice == "2":
-            profile = edit_profile(profile)
-        elif choice == "3":
-            print(json.dumps(agent.engine.stats(), indent=2))
-        elif choice in {"4", "q", "quit", "exit"}:
-            return
-        else:
-            print("Invalid choice.\n")
+    for course in recommendations:
+        with st.container(border=True):
+            requirement = f" · {course['requirement']}" if course.get("requirement") else ""
+            st.subheader(f"{course['course_code']} · {course['title']}")
+            st.caption(f"Computer code {course.get('computer_code')} · {course.get('units', '?')} units{requirement}")
+            for message in course.get("eligibility", []) + course.get("matches", []):
+                st.write(f"✓ {message}")
+            if course.get("sections"):
+                st.write("**Sections**")
+                for section in course["sections"]:
+                    room = f" · room {section['room']}" if section.get("room") else ""
+                    st.write(f"{section.get('section')} · {section.get('meeting') or 'time unavailable'}{room}")
+            with st.expander("Sources"):
+                for evidence in course.get("evidence", []):
+                    st.write(f"**{evidence.get('claim')}**")
+                    st.caption(source_text(evidence.get("source")))
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="BITS Academic Course Recommender")
-    parser.add_argument("--query", help="Run one recommendation query")
-    parser.add_argument("--profile", action="store_true", help="Create or update the student profile")
-    parser.add_argument("--json", action="store_true", help="Print query results as JSON")
-    parser.add_argument("--limit", type=int, default=8, help="Maximum recommendations")
-    args = parser.parse_args()
+    st.set_page_config(page_title="BITS Course Recommender", page_icon="🎓", layout="wide")
+    st.title("BITS Academic Course Recommender")
+    st.caption("Course recommendations from the supplied Bulletin, regulations, timetable and handouts")
+    engine = load_engine()
+    with st.sidebar:
+        st.header("Settings")
+        api_key = st.text_input("Gemini API key", type="password", value=os.getenv("GEMINI_API_KEY", ""))
+        model = st.text_input("Gemini model", value=os.getenv("GEMINI_MODEL", "gemini-3.8-flash"))
+        stats = engine.stats()
+        st.divider()
+        st.write(f"Term: {stats.get('term', 'Unknown')}")
+        st.write(f"Current offerings: {stats.get('current_offerings', 0)}")
+        st.write(f"Handouts: {stats.get('handouts', 0)}")
 
-    agent = RecommendationAgent(CourseRecommender(ROOT))
     profile = load_profile()
-    if args.profile:
-        profile = edit_profile(profile)
-    if args.query:
+    profile_tab, query_tab = st.tabs(("Student profile", "Course search"))
+    with profile_tab:
+        updated = profile_form(profile)
+        if updated is not None:
+            save_profile(updated)
+            profile = updated
+            st.success("Profile saved")
+    with query_tab:
         if not profile:
-            profile = edit_profile()
-        run_query(agent, profile, args.query, args.limit, args.json)
-        return
-    if not args.profile:
-        interactive(agent)
+            st.warning("Save a student profile before searching for courses.")
+            return
+        query = st.text_area("What kind of course are you looking for?", placeholder="Suggest AI DELs with no quiz")
+        limit = st.slider("Maximum results", 1, 20, 8)
+        if st.button("Find courses", type="primary", use_container_width=True):
+            if not query.strip():
+                st.warning("Enter a query.")
+                return
+            if api_key:
+                os.environ["GEMINI_API_KEY"] = api_key
+            else:
+                os.environ.pop("GEMINI_API_KEY", None)
+            os.environ["GEMINI_MODEL"] = model
+            with st.spinner("Checking courses..."):
+                result = RecommendationAgent(engine).run(profile, query.strip(), limit)
+            show_recommendations(result)
 
 
 if __name__ == "__main__":

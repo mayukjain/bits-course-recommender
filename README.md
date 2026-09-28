@@ -8,43 +8,31 @@ Regulations, timetable and course handouts.
 - Python 3.10 or newer
 - Poppler (`pdftotext`) for rebuilding extracted data
 
+Install the Python dependency:
+
+```bash
+python -m pip install -r requirements.txt
+```
+
 ## Run
 
 ```bash
-python app.py
+streamlit run app.py
 ```
 
-This starts an interactive terminal menu. The first run asks for the student profile
-and saves it to `student_profile.json`.
-
-Run a single query with the saved profile:
-
-```bash
-python app.py --query "Suggest AI DELs with no quiz"
-```
-
-Print the full result as JSON:
-
-```bash
-python app.py --query "Suggest AI DELs" --json
-```
-
-Create or update the profile:
-
-```bash
-python app.py --profile
-```
+The browser dashboard contains the student profile form and course search. Profiles
+are saved locally to `student_profile.json`.
 
 ## Gemini query parsing
 
 ```bash
 export GEMINI_API_KEY="your-key"
 export GEMINI_MODEL="gemini-3.8-flash"
-python app.py
+streamlit run app.py
 ```
 
-`GEMINI_MODEL` is optional. If `GEMINI_API_KEY` is not set, the application uses its local query parser.
-Academic validation is handled locally in both cases.
+The key can also be entered in the dashboard sidebar. `GEMINI_MODEL` is optional.
+If no key is provided, the application uses its local query parser.
 
 ## Rebuild data
 
@@ -63,7 +51,7 @@ python -m unittest -v
 
 ## Main files
 
-- `app.py`: terminal interface and profile management
+- `app.py`: Streamlit dashboard and profile management
 - `agent.py`: query parsing workflow
 - `recommender.py`: eligibility checks and course ranking
 - `constraints.py`: Bulletin, regulations and timetable extraction
